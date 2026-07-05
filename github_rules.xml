@@ -1,0 +1,195 @@
+<group name="github,github_webhook,">
+  <!-- Base rule: matches any event written by the receiver. Everything else
+       in this file is a child of this rule, so it inherits the base match
+       condition (log source) without re-specifying it. -->
+  <rule id="100050" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="event_type">\.+</field>
+    <description>GitHub webhook event received: $(event_type) / $(gh_action) by $(actor) on $(org)</description>
+    <options>no_full_log</options>
+  </rule>
+ 
+  <!-- Org membership changes: added/removed members -->
+  <rule id="100051" level="8">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^member$|^membership$|^organization$</field>
+    <field name="gh_action">removed|member_removed</field>
+    <description>GitHub: member removed from org/repo - $(actor) removed a member from $(org)/$(repo)</description>
+    <mitre>
+      <id>T1531</id>
+    </mitre>
+  </rule>
+ 
+  <rule id="100052" level="6">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^member$|^membership$|^organization$</field>
+    <field name="gh_action">added|member_added|member_invited</field>
+    <description>GitHub: member added/invited - $(actor) added a member to $(org)/$(repo)</description>
+  </rule>
+ 
+  <!-- Repository visibility change: private -> public is a common exposure incident -->
+  <rule id="100053" level="12">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^repository$</field>
+    <field name="gh_action">publicized</field>
+    <description>GitHub: repository made PUBLIC - $(repo) by $(actor). Review immediately for exposed secrets/IP.</description>
+  </rule>
+ 
+  <rule id="100054" level="10">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^repository$</field>
+    <field name="gh_action">deleted|transferred</field>
+    <description>GitHub: repository deleted or transferred - $(repo) by $(actor)</description>
+  </rule>
+ 
+  <!-- Branch protection changes: weakening protections is a common
+       pre-attack step (e.g. before a malicious force-push) -->
+  <rule id="100055" level="10">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^branch_protection_rule$</field>
+    <field name="gh_action">deleted|edited</field>
+    <description>GitHub: branch protection rule changed on $(repo) by $(actor) - verify this was authorized</description>
+    <mitre>
+      <id>T1195.001</id>
+    </mitre>
+  </rule>
+ 
+  <!-- Webhook / hook lifecycle changes: attacker persistence mechanism
+       (a rogue webhook can exfiltrate data on every push/PR) -->
+  <rule id="100056" level="12">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^organization$|^repository$</field>
+    <field name="gh_action">hook_created|hook_deleted</field>
+    <description>GitHub: webhook configuration changed on $(org)/$(repo) by $(actor) - possible persistence/exfil mechanism, verify immediately</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+ 
+  <!-- Team changes: privilege escalation surface -->
+  <rule id="100057" level="7">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^team$|^team_add$</field>
+    <description>GitHub: team membership/permission change - $(gh_action) on $(org) by $(actor)</description>
+  </rule>
+ 
+  <!-- Secret scanning / push protection alerts: real leaked-credential signal -->
+  <rule id="100058" level="12">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^secret_scanning_alert$</field>
+    <field name="gh_action">created</field>
+    <description>GitHub: secret scanning alert - a credential/secret may have been committed to $(repo)</description>
+    <mitre>
+      <id>T1552.001</id>
+    </mitre>
+  </rule>
+ 
+  <!-- Admin/owner role changes -->
+  <rule id="100059" level="10">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^organization$</field>
+    <field name="gh_action">member_role_changed|member_added_to_owners</field>
+    <description>GitHub: org role/ownership change by $(actor) on $(org) - verify authorization</description>
+  </rule>
+ 
+  <!-- Webhook itself deleted: fires as a last delivery before the hook stops
+       working entirely. If your event stream suddenly goes quiet after one
+       of these, that silence IS the alert - treat gaps in this log as
+       suspicious, not just the presence of this event. -->
+  <rule id="100060" level="13">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^meta$</field>
+    <description>GitHub: this webhook was just deleted by $(actor) on $(org)/$(repo) - monitoring for this org/repo may now be BLIND. Investigate immediately.</description>
+    <mitre>
+      <id>T1562.008</id>
+    </mitre>
+  </rule>
+ 
+  <!-- Deploy key added/removed: a new deploy key is a durable, easily
+       overlooked persistence/access mechanism -->
+  <rule id="100061" level="9">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^deploy_key$</field>
+    <description>GitHub: deploy key $(gh_action) on $(repo) by $(actor) - verify this was authorized</description>
+    <mitre>
+      <id>T1098.004</id>
+    </mitre>
+  </rule>
+ 
+  <!-- Personal access token requests (fine-grained PAT approval workflow) -->
+  <rule id="100062" level="8">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^personal_access_token_request$</field>
+    <description>GitHub: personal access token request $(gh_action) for $(org) by $(actor)</description>
+  </rule>
+ 
+  <rule id="100063" level="11">
+    <if_sid>100062</if_sid>
+    <field name="gh_action">approved</field>
+    <description>GitHub: fine-grained PAT request APPROVED for $(org) - confirm scope/repo access granted was intentional</description>
+  </rule>
+ 
+  <!-- Org block: a user blocked from the org (or unblocked, which is the
+       more interesting direction to alert on if unexpected) -->
+  <rule id="100064" level="7">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^org_block$</field>
+    <description>GitHub: org block change ($(gh_action)) on $(org) by $(actor)</description>
+  </rule>
+ 
+  <!-- Dependabot / code scanning / repo vulnerability alerts: real
+       vulnerability signal, not an intrusion indicator by itself, but
+       "dismissed" actions on these are worth a closer look -->
+  <rule id="100065" level="6">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^dependabot_alert$|^code_scanning_alert$|^repository_vulnerability_alert$</field>
+    <field name="gh_action">created</field>
+    <description>GitHub: new vulnerability alert ($(event_type)) on $(repo)</description>
+  </rule>
+ 
+  <rule id="100066" level="9">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^dependabot_alert$|^code_scanning_alert$|^repository_vulnerability_alert$</field>
+    <field name="gh_action">dismissed|auto_dismissed</field>
+    <description>GitHub: vulnerability alert DISMISSED ($(event_type)) on $(repo) by $(actor) - verify this was a legitimate risk-acceptance decision</description>
+  </rule>
+ 
+  <!-- Security & analysis features (secret scanning, code scanning, etc.)
+       toggled off at the repo level is a common pre-attack step -->
+  <rule id="100067" level="12">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^security_and_analysis$</field>
+    <description>GitHub: security/analysis feature configuration changed on $(repo) by $(actor) - verify a protection wasn't disabled</description>
+  </rule>
+ 
+  <!-- Repository ruleset changes: newer alternative/superset of classic
+       branch protection rules -->
+  <rule id="100068" level="10">
+    <if_sid>100050</if_sid>
+    <field name="event_type">^repository_ruleset$</field>
+    <field name="gh_action">deleted|edited</field>
+    <description>GitHub: repository ruleset changed on $(repo) by $(actor) - verify this was authorized</description>
+  </rule>
+ 
+  <!-- Bypass requests: someone asking to skip a push ruleset or secret
+       scanning push protection. The request itself is informational; an
+       APPROVED bypass is the higher-signal event. -->
+  <rule id="100069" level="6">
+    <if_sid>100050</if_sid>
+    <field name="event_type">.*bypass.*</field>
+    <description>GitHub: protection bypass request event ($(event_type)/$(gh_action)) on $(repo) by $(actor)</description>
+  </rule>
+ 
+  <rule id="100070" level="10">
+    <if_sid>100069</if_sid>
+    <field name="gh_action">approved|completed</field>
+    <description>GitHub: protection bypass request APPROVED/COMPLETED on $(repo) by $(actor) - confirm this was a legitimate exception</description>
+  </rule>
+ 
+  <!-- Catch-all for anything not classified above, kept at low severity so
+       it's searchable without generating alert fatigue -->
+  <rule id="100080" level="3">
+    <if_sid>100050</if_sid>
+    <description>GitHub webhook event (uncategorized): $(event_type)/$(gh_action)</description>
+  </rule>
+</group>
