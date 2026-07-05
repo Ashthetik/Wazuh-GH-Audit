@@ -58,6 +58,7 @@ There's a critical point that needs to be addressed! Unlike using the native git
 - `rule.groups: "github_webhook"`
 
 It is also recommended to create a Webhook with the following permissions:
+
 - Identity & access:
 - - Memberships
 - - Organizations
