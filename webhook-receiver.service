@@ -6,10 +6,9 @@ After=network.target
 Type=simple
 User=github-webhook
 Group=github-webhook
-WorkingDirectory=/opt/github-webhook-receiver
-Environment="GITHUB_WEBHOOK_SECRET_FILE=/etc/github-webhook/secret"
+WorkingDirectory=/opt/github-webhook
 EnvironmentFile=-/etc/github-webhook/env
-ExecStart=/opt/github-webhook-receiver/venv/bin/gunicorn -w 2 -b 127.0.0.1:8787 --access-logfile - github_webhook_receiver:app
+ExecStart=/opt/github-webhook/venv/bin/gunicorn -w 2 -b 127.0.0.1:8787 --access-logfile - main:app
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
