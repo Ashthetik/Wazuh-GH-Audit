@@ -66,21 +66,8 @@ async def append_event(event_type: str, delivery_id: str, payload: dict[str, Any
     with open(LOG_PATH, "a+") as f:
         f.write(json.dumps(record, separators=(',', ':')) + '\n')
 
-async def _queue(name: str, queue: Any, data: dict[Any, Any]):
-    while True:
-        event_type: Any = data.get("event_type")
-        delivery_id: Any = data.get("delivery_id")
-        payload: Any = data.get("payload")
-
-        await append_event(event_type, delivery_id, payload)
-
-        queue.task_done()
-
-
 @app.post("/webhooks/github")
 async def github_webhook():
-    queue: asyncio.Queue[Any] = asyncio.Queue()
-
     raw_body = request.get_data()
     if len(raw_body) > MAX_BODY_BYTES:
         return jsonify(error="payload too large"), 413
@@ -103,19 +90,9 @@ async def github_webhook():
     except (json.JSONDecodeError, UnicodeDecodeError):
         return jsonify(error="Invalid JSON body"), 400
     
-    data: dict[str, Any] = {
-        "event_type": event_type,
-        "delivery_id": delivery_id,
-        "payload": payload
-    }
+    await append_event(event_type, delivery_id, payload)
 
-    tasks: Any = []
-    for i in range(3):
-        task = asyncio.create_task(_queue(f"worker-{i}", queue, data))
-        tasks.append(task)
-
-    await queue.join()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    return jsonify(status="accepted"), 200
 
 async def main():
     app.run(host="127.0.0.1", port=8787)
