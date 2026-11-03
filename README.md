@@ -29,12 +29,13 @@ chmod 600 /etc/github-webhook/env
 chown github-webhook:github-webhook /etc/github-webhook/env
 
 echo "GITHUB_SECRET=$(openssl rand -hex 32)" >> /etc/github-webhook/env
-echo "WEBHOOK_LOG_PATH=/var/log/github-webhooks/evennts.log" >> /etc/github-webhook/env
+echo "WEBHOOK_LOG_PATH=/var/log/github-webhooks/events.log" >> /etc/github-webhook/env
 
-# Setup Python for our receiver
+# Setup Python for our receiver.
+# The views are `async def`, so Flask needs the async extra or it raises
+# at request time; gunicorn serves it.
 python3 -m venv /opt/github-webhook/venv
- # we're using gunicorn to run flask
-/opt/github-webhook/venv/bin/pip3 install flask gunicord
+/opt/github-webhook/venv/bin/pip install "flask[async]" gunicorn
 
 # Clone the repo and place our files
 git clone https://github.com/Ashthetik/Wazuh-GH-Audit.git
@@ -42,15 +43,46 @@ git clone https://github.com/Ashthetik/Wazuh-GH-Audit.git
 cp Wazuh-GH-Audit/src/main.py /opt/github-webhook/
 cp Wazuh-GH-Audit/webhook-receiver.service /etc/systemd/system/
 
-echo $(cat github_rules.xml) >> /var/ossec/etc/rules/local_rules.xml
+# Wazuh 4.x auto-loads every .xml under etc/rules, so drop the file in
+# whole rather than flattening it into local_rules.xml.
+cp Wazuh-GH-Audit/github_rules.xml /var/ossec/etc/rules/
+chown wazuh:wazuh /var/ossec/etc/rules/github_rules.xml
+
+# Tell Wazuh to actually read the log. Without this the receiver writes
+# events and nothing ever ingests them.
+cat >> /var/ossec/etc/ossec.conf <<'EOF'
+<ossec_config>
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/log/github-webhooks/events.log</location>
+  </localfile>
+</ossec_config>
+EOF
+
+# The receiver logs the full raw payload per event, so rotate it.
+cat > /etc/logrotate.d/github-webhooks <<'EOF'
+/var/log/github-webhooks/events.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
 
 # Reload the daemon and Wazuh Manager
 systemctl daemon-reload
 systemctl enable --now webhook-receiver.service
 systemctl restart wazuh-manager
 
-echo "Wooo! We're done!
+echo "Wooo! We're done!"
 ```
+
+The receiver binds `127.0.0.1:8787`, so GitHub cannot reach it directly.
+Put it behind a reverse proxy that terminates TLS and forwards
+`POST /webhooks/github`, and point the GitHub webhook at that public URL
+with the same secret you generated above.
 
 ## Key Takeaway
 There's a critical point that needs to be addressed! Unlike using the native git audit logs, our log files **will not** appear in the Cloud Security tab of the Wazuh WUI. It will instead appear in the Threat Hunting tab under the following:
