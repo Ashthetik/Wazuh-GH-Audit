@@ -56,8 +56,9 @@ async def append_event(event_type: str, delivery_id: str, payload: dict[str, Any
         "event_type": event_type,
         # "action" itself is reserved, so we have to specify our own type
         "gh_action": payload.get("action"), # eg. removed/added/created/etc.
-        "repo": org.get("login"),
-        "repo_visibility": repo.get("full_name"),
+        "org": org.get("login"),
+        "repo": repo.get("full_name"),
+        "repo_visibility": repo.get("visibility"),
         "actor": sender.get("login"),
         "actor_id": sender.get("id"),
         "raw": payload,
